@@ -1,0 +1,47 @@
+name: Kennwort
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1" # weekly: the live Pwned Passwords API must still answer in the expected format
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - run: dotnet restore
+      - run: dotnet build --no-restore -c Release -warnaserror
+      - run: dotnet test --no-build -c Release
+      - run: dotnet pack -c Release --no-build -o nupkg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kennwort-nupkg
+          path: nupkg/*.nupkg
+
+  # Real Have I Been Pwned API (k-anonymity: only the 5-character hash prefix is sent).
+  live-hibp:
+    needs: build-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - run: dotnet build src/Kennwort.Cli -c Release
+      - name: A famous breached passphrase is rejected
+        run: |
+          set +e
+          echo "correct horse battery staple" | dotnet run --project src/Kennwort.Cli -c Release --no-build
+          test $? -eq 1
+      - name: A random passphrase is accepted
+        run: |
+          openssl rand -hex 16 | sed 's/^/kw-/' | dotnet run --project src/Kennwort.Cli -c Release --no-build
